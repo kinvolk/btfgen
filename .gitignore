@@ -1,0 +1,3 @@
+btfgen
+libbpf_out/*
+.vscode/*

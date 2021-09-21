@@ -1,0 +1,7 @@
+btf-gen Copyright (c) Microsoft Corporation.
+
+Third Party Software:
+
+This project uses a fork
+(https://github.com/kinvolk/libbpf/tree/btfgen) of libbpf that is
+licensed as BSD-2-Clause OR LGPL-2.1.
