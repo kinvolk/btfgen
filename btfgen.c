@@ -125,7 +125,7 @@ int main(int argc, char **argv)
 				return 1;
 			}
 
-			err = bpf_object__reloc_info_gen(info, obj, btf_path);
+			err = bpf_object__reloc_info_gen(info, obj);
 			if (err) {
 				printf("failed to generate btf info for object\n");
 				return 1;
