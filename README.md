@@ -8,6 +8,9 @@ tool, a developer can ship the eBPF program and the BTF information needed to
 run it on different kernels. The size of the BTF info for each kernel for a
 specific program is some hundreds of bytes in most of the cases.
 
+**Note: This is an experimental repository. We plan to upstream these changes to
+libbpf and probably bpftool too.**
+
 ## How does it work?
 
 The logic to calculate the BTF information that is needed for an eBPF program is
