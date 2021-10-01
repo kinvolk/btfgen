@@ -30,11 +30,13 @@ static struct env {
 	const char *inputdir;
 	const char *obj[MAX_OBJECTS];
 	int obj_index;
+	bool verbose;
 } env = {
 	.obj_index = 0,
 };
 
 static const struct argp_option opts[] = {
+	{ "verbose", 'v', NULL, 0, "display libbpf debug messages" },
 	{ "outputdir", 'o', "outputdir", 0, "dir to output the result BTF files" },
 	{ "inputdir", 'i', "inputdir", 0, "dir with source BTF files to use" },
 	{ "object", OBJ_KEY,  "object", 0, "path of object file to generate BTFs for" },
@@ -44,6 +46,8 @@ static const struct argp_option opts[] = {
 static error_t parse_arg(int key, char *arg, struct argp_state *state)
 {
 	switch (key) {
+	case 'v':
+		env.verbose = true;
 	case 'o':
 		env.outputdir = arg;
 		break;
@@ -61,13 +65,15 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
 {
+	if (!env.verbose)
+		return 0;
+
 	return vfprintf(stderr, format, args);
 }
 
 int main(int argc, char **argv)
 {
-	/* Set up libbpf errors and debug info callback */
-	//libbpf_set_print(libbpf_print_fn);
+	libbpf_set_print(libbpf_print_fn);
 
 	static const struct argp argp = {
 		.options = opts,
