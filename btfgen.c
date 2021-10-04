@@ -57,9 +57,9 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 		env->obj[env->obj_index++] = arg;
 		break;
 	case ARGP_KEY_END:
-	if (env->outputdir == NULL || env->inputdir == NULL || env->obj_index == 0)
-		argp_usage(state);
-	break;
+		if (env->outputdir == NULL || env->inputdir == NULL || env->obj_index == 0)
+			argp_usage(state);
+		break;
 	default:
 		return ARGP_ERR_UNKNOWN;
 	}
@@ -97,7 +97,6 @@ int main(int argc, char **argv)
 	if (env.verbose) {
 		libbpf_set_print(verbose_print);
 	}
-	
 
 	DIR *d;
 	struct dirent *dir;
@@ -108,12 +107,15 @@ int main(int argc, char **argv)
 	}
 
 	while ((dir = readdir(d)) != NULL) {
-		char btf_path[1024];
+		if (dir->d_type != DT_REG)
+			continue;
+
+		char btf_path[PATH_MAX];
 
 		int len = strlen(dir->d_name);
 
 		// ignore non BTF files
-		if (strcmp(dir->d_name + len - 4, ".btf")) {
+		if (strncmp(dir->d_name + len - 4, ".btf", 4)) {
 			continue;
 		}
 
