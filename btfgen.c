@@ -25,14 +25,12 @@
 #define OBJ_KEY 260
 #define MAX_OBJECTS 128
 
-static struct env {
+struct env {
 	const char *outputdir;
 	const char *inputdir;
 	const char *obj[MAX_OBJECTS];
 	int obj_index;
 	bool verbose;
-} env = {
-	.obj_index = 0,
 };
 
 static const struct argp_option opts[] = {
@@ -45,46 +43,61 @@ static const struct argp_option opts[] = {
 
 static error_t parse_arg(int key, char *arg, struct argp_state *state)
 {
+	struct env *env = state->input;
 	switch (key) {
 	case 'v':
-		env.verbose = true;
+		env->verbose = true;
 	case 'o':
-		env.outputdir = arg;
+		env->outputdir = arg;
 		break;
 	case 'i':
-		env.inputdir = arg;
+		env->inputdir = arg;
 		break;
 	case OBJ_KEY:
-		env.obj[env.obj_index++] = arg;
+		env->obj[env->obj_index++] = arg;
 		break;
+	case ARGP_KEY_END:
+	if (env->outputdir == NULL || env->inputdir == NULL || env->obj_index == 0)
+		argp_usage(state);
+	break;
 	default:
 		return ARGP_ERR_UNKNOWN;
 	}
 	return 0;
 }
 
-static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
+static int silent_print(enum libbpf_print_level level, const char *format, va_list args)
 {
-	if (!env.verbose)
-		return 0;
+	return 0;
+}
 
+static int verbose_print(enum libbpf_print_level level, const char *format, va_list args)
+{
 	return vfprintf(stderr, format, args);
 }
 
 int main(int argc, char **argv)
 {
-	libbpf_set_print(libbpf_print_fn);
-
 	static const struct argp argp = {
 		.options = opts,
 		.parser = parse_arg,
 	};
 
+	static struct env env = {
+		.obj_index = 0,
+	};
+
 	int err;
 
-	err = argp_parse(&argp, argc, argv, 0, NULL, NULL);
+	err = argp_parse(&argp, argc, argv, 0, NULL, &env);
 	if (err)
 		return err;
+
+	libbpf_set_print(silent_print);
+	if (env.verbose) {
+		libbpf_set_print(verbose_print);
+	}
+	
 
 	DIR *d;
 	struct dirent *dir;
