@@ -98,17 +98,15 @@ int main(int argc, char **argv)
 			continue;
 		}
 
+		snprintf(btf_path, sizeof(btf_path), "%s/%s", env.inputdir, dir->d_name);
+		printf("opening %s\n", btf_path);
+
 		// create info struct for each BTF source file
-		struct btf_reloc_info *info =  bpf_reloc_info_new();
+		struct btf_reloc_info *info = bpf_reloc_info_new(btf_path);
 		if (info == NULL) {
 			printf("failed to allocate info structure");
 			return 1;
 		}
-
-		snprintf(btf_path, sizeof(btf_path), "%s/%s", env.inputdir, dir->d_name);
-		printf("opening %s\n", btf_path);
-
-		info->src_btf = btf__parse(btf_path, NULL);
 
 		for (int i = 0; i < env.obj_index; i++) {
 			printf("processing for %s\n", env.obj[i]);
@@ -116,12 +114,6 @@ int main(int argc, char **argv)
 			struct bpf_object *obj = bpf_object__open(env.obj[i]);
 			if (libbpf_get_error(obj)) {
 				printf("error opening object\n");
-				return 1;
-			}
-
-			err = libbpf_get_error(info->src_btf);
-			if (err) {
-				printf("failed to parse target BTF: %d\n", err);
 				return 1;
 			}
 
