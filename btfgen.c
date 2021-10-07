@@ -67,18 +67,67 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	return 0;
 }
 
-static int silent_print(enum libbpf_print_level level, const char *format, va_list args)
-{
-	return 0;
-}
-
 static int verbose_print(enum libbpf_print_level level, const char *format, va_list args)
 {
 	return vfprintf(stderr, format, args);
 }
 
+int generate_btf(const char *src_btf, const char *dst_btf, const char *objspaths[]) {
+	struct btf_reloc_info *reloc_info;
+	struct btf *btf_new;
+	int err;
+
+	reloc_info = bpf_reloc_info_new(src_btf);
+	err = libbpf_get_error(reloc_info);
+	if (err) {
+		printf("failed to allocate info structure\n");
+		goto out;
+	}
+
+	for (int i = 0; objspaths[i] != NULL; i++) {
+		printf("processing %s object\n", objspaths[i]);
+
+		struct bpf_object *obj = bpf_object__open(objspaths[i]);
+		err = libbpf_get_error(obj);
+		if (err) {
+			printf("error opening object\n");
+			goto out;
+		}
+
+		err = bpf_object__reloc_info_gen(reloc_info, obj);
+		if (err) {
+			bpf_object__close(obj);
+			printf("failed to generate btf info for object\n");
+			goto out;
+		}
+
+		bpf_object__close(obj);
+	}
+
+	btf_new = bpf_reloc_info_get_btf(reloc_info);
+	err = libbpf_get_error(btf_new);
+	if (err) {
+		printf("error generating btf\n");
+		goto out;
+	}
+
+	err = btf__save_to_file(btf_new, dst_btf);
+	if (err) {
+		printf("error saving btf file\n");
+		goto out;
+	}
+
+out:
+	bpf_reloc_info_free(reloc_info);
+	return err;
+}
+
 int main(int argc, char **argv)
 {
+	struct dirent *dir;
+	int err;
+	DIR *d;
+
 	static const struct argp argp = {
 		.options = opts,
 		.parser = parse_arg,
@@ -88,19 +137,15 @@ int main(int argc, char **argv)
 		.obj_index = 0,
 	};
 
-	int err;
-
 	err = argp_parse(&argp, argc, argv, 0, NULL, &env);
 	if (err)
 		return err;
 
-	libbpf_set_print(silent_print);
+	/* Set up libbpf errors and debug info callback */
 	if (env.verbose) {
 		libbpf_set_print(verbose_print);
 	}
 
-	DIR *d;
-	struct dirent *dir;
 	d = opendir(env.inputdir);
 	if (!d) {
 		printf("error opening input dir\n");
@@ -108,51 +153,27 @@ int main(int argc, char **argv)
 	}
 
 	while ((dir = readdir(d)) != NULL) {
+		char src_btf_path[PATH_MAX];
+		char dst_btf_path[PATH_MAX];
+
 		if (dir->d_type != DT_REG)
 			continue;
 
-		char btf_path[PATH_MAX];
-
-		int len = strlen(dir->d_name);
-
-		// ignore non BTF files
-		if (strncmp(dir->d_name + len - 4, ".btf", 4)) {
+		/* ignore non BTF files */
+		if (strncmp(dir->d_name + strlen(dir->d_name) - 4, ".btf", 4))
 			continue;
-		}
 
-		snprintf(btf_path, sizeof(btf_path), "%s/%s", env.inputdir, dir->d_name);
-		printf("opening %s\n", btf_path);
+		snprintf(src_btf_path, sizeof(src_btf_path), "%s/%s", env.inputdir, dir->d_name);
+		snprintf(dst_btf_path, sizeof(dst_btf_path), "%s/%s", env.outputdir, dir->d_name);
 
-		// create info struct for each BTF source file
-		struct btf_reloc_info *info = bpf_reloc_info_new(btf_path);
-		if (info == NULL) {
-			printf("failed to allocate info structure");
+		printf("generating btf from %s\n", src_btf_path);
+
+		err = generate_btf(src_btf_path, dst_btf_path, env.obj);
+		if (err) {
+			printf("failed to generate btf for %s\n", src_btf_path);
+			closedir(d);
 			return 1;
 		}
-
-		for (int i = 0; i < env.obj_index; i++) {
-			printf("processing for %s\n", env.obj[i]);
-
-			struct bpf_object *obj = bpf_object__open(env.obj[i]);
-			if (libbpf_get_error(obj)) {
-				printf("error opening object\n");
-				return 1;
-			}
-
-			err = bpf_object__reloc_info_gen(info, obj);
-			if (err) {
-				printf("failed to generate btf info for object\n");
-				return 1;
-			}
-
-			bpf_object__close(obj);
-		}
-
-		snprintf(btf_path, sizeof(btf_path), "%s/prefix-%s", env.outputdir, dir->d_name);
-
-		//btf_reloc_info_dump(info);
-		btf_reloc_info_save(info, btf_path);
-		bpf_reloc_info_free(info);
 	}
 
 	closedir(d);
