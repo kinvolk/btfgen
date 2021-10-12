@@ -47,6 +47,7 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	switch (key) {
 	case 'v':
 		env->verbose = true;
+		break;
 	case 'o':
 		env->outputdir = arg;
 		break;
