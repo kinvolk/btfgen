@@ -95,6 +95,7 @@ int main(int argc, char **argv)
 	}
 
 	while ((dir = readdir(d)) != NULL) {
+		struct btf *btf;
 		char btf_path[1024];
 
 		int len = strlen(dir->d_name);
@@ -134,8 +135,12 @@ int main(int argc, char **argv)
 
 		snprintf(btf_path, sizeof(btf_path), "%s/prefix-%s", env.outputdir, dir->d_name);
 
-		//btf_reloc_info_dump(info);
-		btf_reloc_info_save(info, btf_path);
+		btf = bpf_reloc_info_get_btf(info);
+		err = btf__save_to_file(btf, btf_path);
+		if (err == -1) {
+			printf("failed to save btf to file\n");
+			return 1;
+		}
 		bpf_reloc_info_free(info);
 	}
 
