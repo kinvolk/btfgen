@@ -118,6 +118,8 @@ int generate_btf(const char *src_btf, const char *dst_btf, const char *objspaths
 	}
 
 out:
+	if (!libbpf_get_error(btf_new))
+		btf__free(btf_new);
 	bpf_reloc_info_free(reloc_info);
 	return err;
 }
