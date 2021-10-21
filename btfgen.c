@@ -77,7 +77,7 @@ int generate_btf(const char *src_btf, const char *dst_btf, const char *objspaths
 	struct btf *btf_new;
 	int err;
 
-	reloc_info = bpf_reloc_info_new(src_btf);
+	reloc_info = bpf_reloc_info__new(src_btf);
 	err = libbpf_get_error(reloc_info);
 	if (err) {
 		printf("failed to allocate info structure\n");
@@ -104,7 +104,7 @@ int generate_btf(const char *src_btf, const char *dst_btf, const char *objspaths
 		bpf_object__close(obj);
 	}
 
-	btf_new = bpf_reloc_info_get_btf(reloc_info);
+	btf_new = bpf_reloc_info__get_btf(reloc_info);
 	err = libbpf_get_error(btf_new);
 	if (err) {
 		printf("error generating btf\n");
@@ -120,7 +120,7 @@ int generate_btf(const char *src_btf, const char *dst_btf, const char *objspaths
 out:
 	if (!libbpf_get_error(btf_new))
 		btf__free(btf_new);
-	bpf_reloc_info_free(reloc_info);
+	bpf_reloc_info__free(reloc_info);
 	return err;
 }
 
