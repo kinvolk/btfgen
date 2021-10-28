@@ -1,3 +1,7 @@
 btfgen
+btfgen2
+btfgen2.o
+stolen.o
+hashmap.o
 libbpf_out/*
 .vscode/*
