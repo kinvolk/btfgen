@@ -1,14 +1,21 @@
-INCLUDES := -I libbpf_out/usr/include/ -I libbpf/include/uapi/
+CC = gcc
+BASEDIR := $(shell pwd)
+INCLUDES := -I libbpf_out/usr/include/
 
 all: btfgen
 
 LIBBPF_SRC := $(abspath ./libbpf/src)
 
 libbpf_out/usr/lib64/libbpf.a: $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile)
-	mkdir -p libbpf_out && cd $(LIBBPF_SRC) && make DESTDIR=../../libbpf_out install -j && cd ../..
+	mkdir -p $(BASEDIR)/libbpf_out && \
+		cd $(LIBBPF_SRC) && \
+		$(MAKE) DESTDIR=$(BASEDIR)/libbpf_out install && \
+		$(MAKE) DESTDIR=$(BASEDIR)/libbpf_out install_uapi_headers && \
+		cd ../..
 
 btfgen: btfgen.c libbpf_out/usr/lib64/libbpf.a
-	gcc -g -o btfgen $(INCLUDES) $^ -lelf -lz
+	$(CC) -g -static -ggdb -gdwarf -O2 -o btfgen $(INCLUDES) $^ -lelf -lz
 
 clean:
-	rm btfgen
+	$(MAKE) -C libbpf/src clean
+	rm -rf btfgen libbpf_out
