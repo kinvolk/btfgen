@@ -75,239 +75,134 @@ static int verbose_print(enum libbpf_print_level level, const char *format, va_l
 	return vfprintf(stderr, format, args);
 }
 
-struct btf_reloc_member {
-	struct btf_member *member;
-	int idx;
-};
+struct btf;
 
-struct btf_reloc_type {
-	struct btf_type *type;
-	unsigned int id;
+/* generate bigger final BTF with all eBPF object used types (complete complex types) */
+int generate_btf_01(const char *src_btf, const char *dst_btf, const char *objspaths[]) {
 
-	struct hashmap *members;
-};
+	long err;
+	struct btf *temp;
+	struct btf *targ_btf, *btf_obj;
 
-struct btf_reloc_info {
-	struct hashmap *types;
-	struct hashmap *ids_map;
-
-	struct btf *src_btf;
-};
-
-static size_t bpf_reloc_info_hash_fn(const void *key, void *ctx)
-{
-	return (size_t)key;
-}
-
-static bool bpf_reloc_info_equal_fn(const void *k1, const void *k2, void *ctx)
-{
-	return k1 == k2;
-}
-
-static void *uint_as_hash_key(int x) {
-	return (void *)(uintptr_t)x;
-}
-
-static void bpf_reloc_type_free(struct btf_reloc_type *type) {
-	struct hashmap_entry *entry;
-	int i;
-
-	if (IS_ERR_OR_NULL(type))
-		return;
-
-	if (!IS_ERR_OR_NULL(type->members)) {
-		hashmap__for_each_entry(type->members, entry, i) {
-			free(entry->value);
-		}
-		hashmap__free(type->members);
-	}
-
-	free(type);
-}
-
-void bpf_reloc_info__free(struct btf_reloc_info *info) {
-	struct hashmap_entry *entry;
-	int i;
-
-	if (!info)
-		return;
-
-	btf__free(info->src_btf);
-
-	hashmap__free(info->ids_map);
-
-	if (!IS_ERR_OR_NULL(info->types)) {
-		hashmap__for_each_entry(info->types, entry, i) {
-			bpf_reloc_type_free(entry->value);
-		}
-		hashmap__free(info->types);
-	}
-
-	free(info);
-}
-
-struct btf_reloc_info *bpf_reloc_info__new(const char *targ_btf_path) {
-	struct btf_reloc_info *info = NULL;
-	struct btf *src_btf = NULL;
-	struct hashmap *ids_map = NULL;
-	struct hashmap *types = NULL;
-
-	info = calloc(1, sizeof(*info));
-	if (!info)
-		return ERR_PTR(-ENOMEM);
-
-	src_btf = btf__parse(targ_btf_path, NULL);
-	if (libbpf_get_error(src_btf)) {
-		bpf_reloc_info__free(info);
-		return (void *) src_btf;
-	}
-
-	info->src_btf = src_btf;
-
-	ids_map = hashmap__new(bpf_reloc_info_hash_fn, bpf_reloc_info_equal_fn, NULL);
-	if (IS_ERR(ids_map)) {
-		bpf_reloc_info__free(info);
-		return (void *) ids_map;
-	}
-
-	info->ids_map = ids_map;
-
-	types = hashmap__new(bpf_reloc_info_hash_fn, bpf_reloc_info_equal_fn, NULL);
-	if (IS_ERR(types)) {
-		bpf_reloc_info__free(info);
-		return (void *) types;
-	}
-
-	info->types = types;
-
-	return info;
-}
-
-int bpf_object__reloc_info_gen(struct btf_reloc_info *info, struct bpf_object *obj)
-{
-	//obj->reloc_info = info;
-	//return bpf_object__relocate_core(obj, NULL);
-	return 0;
-}
-
-static int btf_reloc_info_gen_field(struct btf_reloc_info *info, struct bpf_core_spec *targ_spec) {
-	struct btf *btf = (struct btf *) targ_spec->btf;
-	struct btf_reloc_type *reloc_type;
-	struct btf_member *btf_member;
-	struct btf_type *btf_type;
-	struct btf_array *array;
-	unsigned int id;
-	int idx, err;
-
-	btf_type = btf_type_by_id(btf, targ_spec->root_type_id);
-
-	/*
-	// create reloc type for root type
-	reloc_type = btf_reloc_put_type(btf, info, btf_type, targ_spec->root_type_id);
-	if (IS_ERR(reloc_type))
-		return PTR_ERR(reloc_type);
-
-	// add types for complex types (arrays, unions, structures)
-	for (int i = 1; i < targ_spec->raw_len; i++) {
-
-		// skip typedefs and mods
-		while (btf_is_mod(btf_type) || btf_is_typedef(btf_type)) {
-			id = btf_type->type;
-			reloc_type = btf_reloc_get_type(info, id);
-			if (IS_ERR(reloc_type))
-				return PTR_ERR(reloc_type);
-			btf_type = (struct btf_type*) btf__type_by_id(btf, id);
-		}
-
-		switch (btf_kind(btf_type)) {
-		case BTF_KIND_STRUCT:
-		case BTF_KIND_UNION:
-			idx = targ_spec->raw_spec[i];
-			btf_member = btf_members(btf_type) + idx;
-			btf_type = btf_type_by_id(btf, btf_member->type);
-
-			// add member to relocation type
-			err = bpf_reloc_type_add_member(info, reloc_type, btf_member, idx);
-			if (err)
-				return err;
-			// add relocation type
-			reloc_type = btf_reloc_put_type(btf, info, btf_type, btf_member->type);
-			if (IS_ERR(reloc_type))
-				return PTR_ERR(reloc_type);
-			break;
-		case BTF_KIND_ARRAY:
-			array = btf_array(btf_type);
-			reloc_type = btf_reloc_get_type(info, array->type);
-			if (IS_ERR(reloc_type))
-				return PTR_ERR(reloc_type);
-			btf_type = (struct btf_type *) btf__type_by_id(btf, array->type);
-			break;
-		default:
-			pr_warn("spec type wasn't handled: %s\n", btf_kind_str(btf_type));
-			return 1;
-		}
-	}
-	*/
-
-	return 0;
-}
-
-int generate_btf(const char *src_btf, const char *dst_btf, const char *objspaths[]) {
-	struct btf_reloc_info *reloc_info;
-	struct btf *btf_new;
-	int err;
-
-	reloc_info = bpf_reloc_info__new(src_btf);
-	err = libbpf_get_error(reloc_info);
+	// src_btf == target kernel BTF information
+	targ_btf = btf__parse_raw(src_btf);
+	err = libbpf_get_error(targ_btf);
 	if (err) {
-		printf("failed to allocate info structure\n");
-		goto out;
+		printf("error: could not parse src_btf: %s", src_btf);
+		return -ENOENT;
+	}
+
+	for (int i = 0; objspaths[i] != NULL; i++) {
+		printf("info: processing %s object\n", objspaths[i]);
+
+		// btf_obj == eBPF objects BTF information
+		btf_obj = btf__parse_elf(objspaths[i], NULL);
+		err = libbpf_get_error(btf_obj);
+		if (err) {
+			printf("warning: could not parse btf_obj: %s\n", objspaths[i]);
+			continue;
+		}
+
+		int n = btf__get_nr_types(btf_obj);
+		for (int i = 0; i < n; i++) {
+			const struct btf_type *t = btf__type_by_id(btf_obj, i);
+
+			if (btf_is_struct(t)) {
+				printf("achou\n");
+			}
+		}
+	}
+
+	return 0;
+}
+
+/* bpf_object__relocate_core logic: we need the bpf_core_relos */
+int bpf_object_relocate_core(struct bpf_object *obj) {
+
+	int i = 0;
+
+	const struct btf_ext_info_sec *sec;
+	const struct bpf_core_relo *rec;
+	const struct btf_ext_info *seg;
+
+	struct bpf_program *prog;
+
+	const char *sec_name;
+
+	seg = &obj->btf_ext->core_relo_info;
+	for_each_btf_ext_sec(seg, sec)
+	{
+		sec_name = btf__name_by_offset(obj->btf, sec->sec_name_off);
+		if (str_is_empty(sec_name)) {
+			printf("error: sec_name is empty\n");
+			return -1;
+		}
+		printf("sec_name = %s\n", sec_name);
+
+		prog = NULL;
+		for (i = 0; i < obj->nr_programs; i++) {
+			prog = &obj->programs[i];
+			if (strcmp(prog->sec_name, sec_name) == 0)
+				break;
+		}
+		if (!prog) {
+			printf("sec '%s': failed to find a BPF program\n", sec_name);
+			return -ENOENT;
+		}
+
+		int sec_idx = prog->sec_idx;
+
+		printf("sec '%s': found %d CO-RE relocations\n", sec_name, sec->num_info);
+
+		for_each_btf_ext_rec(seg, sec, i, rec)
+		{
+			int insn_idx = rec->insn_off / BPF_INSN_SZ;
+			// each rec, here, is a bpf_core_relo for us to discover types in target BTF
+			// we can do something like bpf_core_find_cands
+		}
+	}
+
+	return 0;
+}
+
+/* try to use .BTF.ext relocation information to generate final BTF */
+int generate_btf_02(const char *src_btf, const char *dst_btf, const char *objspaths[]) {
+
+	long err;
+	struct btf *temp;
+	struct btf *targ_btf, *btf_obj;
+
+	// src_btf == target kernel BTF information
+	targ_btf = btf__parse_raw(src_btf);
+	err = libbpf_get_error(targ_btf);
+	if (err) {
+		printf("error: could not parse src_btf: %s", src_btf);
+		return -ENOENT;
 	}
 
 	for (int i = 0; objspaths[i] != NULL; i++) {
 		printf("processing %s object\n", objspaths[i]);
 
-		struct bpf_object *obj = bpf_object__open(objspaths[i]);
+		struct bpf_object_open_opts opts = {};
+		opts.sz = sizeof(struct bpf_object_open_opts);
+		opts.btf_custom_path = strdup(src_btf);
+
+		struct bpf_object *obj = bpf_object__open_file(objspaths[i], &opts);
 		err = libbpf_get_error(obj);
 		if (err) {
-			printf("error opening object\n");
-			goto out;
+			printf("error: could not open ebpf object\n");
+			return -ENOENT;
 		}
 
-		err = bpf_object__reloc_info_gen(reloc_info, obj);
-		if (err) {
-			bpf_object__close(obj);
-			printf("failed to generate btf info for object\n");
-			goto out;
-		}
+		// here we would need to call a function to each bpf_core_relo inside .BTF.ext of obj
+		bpf_object_relocate_core(obj);
 
 		bpf_object__close(obj);
 	}
 
-	/*
-	btf_new = bpf_reloc_info__get_btf(reloc_info);
-	err = libbpf_get_error(btf_new);
-	if (err) {
-		printf("error generating btf\n");
-		goto out;
-	}
-
-	err = btf__save_to_file(btf_new, dst_btf);
-	if (err) {
-		printf("error saving btf file\n");
-		goto out;
-	}
-
-out:
-	if (!libbpf_get_error(btf_new))
-		btf__free(btf_new);
-	bpf_reloc_info__free(reloc_info);
-	return err;
-	*/
-
-out:
 	return 0;
 }
+
 
 int main(int argc, char **argv)
 {
@@ -355,7 +250,8 @@ int main(int argc, char **argv)
 
 		printf("generating btf from %s\n", src_btf_path);
 
-		err = generate_btf(src_btf_path, dst_btf_path, env.obj);
+		//err = generate_btf_01(src_btf_path, dst_btf_path, env.obj);
+		err = generate_btf_02(src_btf_path, dst_btf_path, env.obj);
 		if (err) {
 			printf("failed to generate btf for %s\n", src_btf_path);
 			closedir(d);

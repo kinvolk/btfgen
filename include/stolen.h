@@ -1,158 +1,21 @@
 #ifndef __STOLEN_H
 #define __STOLEN_H
 
-#include <btfgen2.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <libelf.h>
 #include <gelf.h>
-#include <linux/types.h>
+#include <bpf/bpf.h>
 
-#define BPF_CORE_SPEC_MAX_LEN 64
-#define BPF_OBJ_NAME_LEN 16U
-
-/* bpf_core_relo_kind encodes which aspect of captured field/type/enum value
- * has to be adjusted by relocations.
- */
-enum bpf_core_relo_kind {
-	BPF_FIELD_BYTE_OFFSET = 0, /* field byte offset */
-	BPF_FIELD_BYTE_SIZE = 1, /* field size in bytes */
-	BPF_FIELD_EXISTS = 2, /* field existence in target kernel */
-	BPF_FIELD_SIGNED = 3, /* field signedness (0 - unsigned, 1 - signed) */
-	BPF_FIELD_LSHIFT_U64 = 4, /* bitfield-specific left bitshift */
-	BPF_FIELD_RSHIFT_U64 = 5, /* bitfield-specific right bitshift */
-	BPF_TYPE_ID_LOCAL = 6, /* type ID in local BPF object */
-	BPF_TYPE_ID_TARGET = 7, /* type ID in target kernel */
-	BPF_TYPE_EXISTS = 8, /* type existence in target kernel */
-	BPF_TYPE_SIZE = 9, /* type size in bytes */
-	BPF_ENUMVAL_EXISTS = 10, /* enum value existence in target kernel */
-	BPF_ENUMVAL_VALUE = 11, /* enum value integer value */
-};
-
-/* represents BPF CO-RE field or array element accessor */
-struct bpf_core_accessor {
-	__u32 type_id; /* struct/union type or array element type */
-	__u32 idx; /* field index or array index */
-	const char *name; /* field name or NULL for array accessor */
-};
-
-struct bpf_core_spec {
-	const struct btf *btf;
-	/* high-level spec: named fields and array indices only */
-	struct bpf_core_accessor spec[BPF_CORE_SPEC_MAX_LEN];
-	/* original unresolved (no skip_mods_or_typedefs) root type ID */
-	__u32 root_type_id;
-	/* CO-RE relocation kind */
-	enum bpf_core_relo_kind relo_kind;
-	/* high-level spec length */
-	int len;
-	/* raw, low-level spec: 1-to-1 with accessor spec string */
-	int raw_spec[BPF_CORE_SPEC_MAX_LEN];
-	/* raw spec length */
-	int raw_len;
-	/* field bit offset represented by spec */
-	__u32 bit_offset;
-};
-
+static inline bool str_is_empty(const char *s)
+{
+	return !s || !s[0];
+}
 
 struct list_head {
 	struct list_head *next, *prev;
 };
 
-struct btf {
-	/* raw BTF data in native endianness */
-	void *raw_data;
-	/* raw BTF data in non-native endianness */
-	void *raw_data_swapped;
-	__u32 raw_size;
-	/* whether target endianness differs from the native one */
-	bool swapped_endian;
-
-	/*
-	 * When BTF is loaded from an ELF or raw memory it is stored
-	 * in a contiguous memory block. The hdr, type_data, and, strs_data
-	 * point inside that memory region to their respective parts of BTF
-	 * representation:
-	 *
-	 * +--------------------------------+
-	 * |  Header  |  Types  |  Strings  |
-	 * +--------------------------------+
-	 * ^          ^         ^
-	 * |          |         |
-	 * hdr        |         |
-	 * types_data-+         |
-	 * strs_data------------+
-	 *
-	 * If BTF data is later modified, e.g., due to types added or
-	 * removed, BTF deduplication performed, etc, this contiguous
-	 * representation is broken up into three independently allocated
-	 * memory regions to be able to modify them independently.
-	 * raw_data is nulled out at that point, but can be later allocated
-	 * and cached again if user calls btf__get_raw_data(), at which point
-	 * raw_data will contain a contiguous copy of header, types, and
-	 * strings:
-	 *
-	 * +----------+  +---------+  +-----------+
-	 * |  Header  |  |  Types  |  |  Strings  |
-	 * +----------+  +---------+  +-----------+
-	 * ^             ^            ^
-	 * |             |            |
-	 * hdr           |            |
-	 * types_data----+            |
-	 * strset__data(strs_set)-----+
-	 *
-	 *               +----------+---------+-----------+
-	 *               |  Header  |  Types  |  Strings  |
-	 * raw_data----->+----------+---------+-----------+
-	 */
-	struct btf_header *hdr;
-
-	void *types_data;
-	size_t types_data_cap; /* used size stored in hdr->type_len */
-
-	/* type ID to `struct btf_type *` lookup index
-	 * type_offs[0] corresponds to the first non-VOID type:
-	 *   - for base BTF it's type [1];
-	 *   - for split BTF it's the first non-base BTF type.
-	 */
-	__u32 *type_offs;
-	size_t type_offs_cap;
-	/* number of types in this BTF instance:
-	 *   - doesn't include special [0] void type;
-	 *   - for split BTF counts number of types added on top of base BTF.
-	 */
-	__u32 nr_types;
-	/* if not NULL, points to the base BTF on top of which the current
-	 * split BTF is based
-	 */
-	struct btf *base_btf;
-	/* BTF type ID of the first type in this BTF instance:
-	 *   - for base BTF it's equal to 1;
-	 *   - for split BTF it's equal to biggest type ID of base BTF plus 1.
-	 */
-	int start_id;
-	/* logical string offset of this BTF instance:
-	 *   - for base BTF it's equal to 0;
-	 *   - for split BTF it's equal to total size of base BTF's string section size.
-	 */
-	int start_str_off;
-
-	/* only one of strs_data or strs_set can be non-NULL, depending on
-	 * whether BTF is in a modifiable state (strs_set is used) or not
-	 * (strs_data points inside raw_data)
-	 */
-	void *strs_data;
-	/* a set of unique strings */
-	struct strset *strs_set;
-	/* whether strings are already deduplicated */
-	bool strs_deduped;
-
-	/* BTF object FD, if loaded into kernel */
-	int fd;
-
-	/* Pointer size (in bytes) for a target architecture of this BTF */
-	int ptr_sz;
-};
+#define BPF_OBJ_NAME_LEN 16U
 
 struct bpf_object {
 	char name[BPF_OBJ_NAME_LEN];
@@ -244,7 +107,149 @@ struct bpf_object {
 	char path[];
 };
 
-struct btf_type *btf_type_by_id(struct btf *, __u32);
-const struct btf_type *btf__type_by_id(const struct btf *, __u32);
+/* libbpf_internal.h */
+
+struct btf_ext_info {
+	/*
+	 * info points to the individual info section (e.g. func_info and
+	 * line_info) from the .BTF.ext. It does not include the __u32 rec_size.
+	 */
+	void *info;
+	__u32 rec_size;
+	__u32 len;
+};
+
+#define for_each_btf_ext_sec(seg, sec)					\
+	for (sec = (seg)->info;						\
+	     (void *)sec < (seg)->info + (seg)->len;			\
+	     sec = (void *)sec + sizeof(struct btf_ext_info_sec) +	\
+		   (seg)->rec_size * sec->num_info)
+
+#define for_each_btf_ext_rec(seg, sec, i, rec)				\
+	for (i = 0, rec = (void *)&(sec)->data;				\
+	     i < (sec)->num_info;					\
+	     i++, rec = (void *)rec + (seg)->rec_size)
+
+struct btf_ext_header {
+	__u16	magic;
+	__u8	version;
+	__u8	flags;
+	__u32	hdr_len;
+
+	__u32	func_info_off;
+	__u32	func_info_len;
+	__u32	line_info_off;
+	__u32	line_info_len;
+
+	__u32	core_relo_off;
+	__u32	core_relo_len;
+};
+
+struct btf_ext {
+	union {
+		struct btf_ext_header *hdr;
+		void *data;
+	};
+	struct btf_ext_info func_info;
+	struct btf_ext_info line_info;
+	struct btf_ext_info core_relo_info;
+	__u32 data_size;
+};
+
+struct btf_ext_info_sec {
+	__u32	sec_name_off;
+	__u32	num_info;
+	__u8	data[];
+};
+
+struct bpf_func_info_min {
+	__u32   insn_off;
+	__u32   type_id;
+};
+
+struct bpf_line_info_min {
+	__u32	insn_off;
+	__u32	file_name_off;
+	__u32	line_off;
+	__u32	line_col;
+};
+
+// libbpf.{h,c}
+
+struct bpf_program {
+	const struct bpf_sec_def *sec_def;
+	char *sec_name;
+
+	size_t sec_idx;
+	size_t sec_insn_off;
+	size_t sec_insn_cnt;
+
+	size_t sub_insn_off;
+
+	char *name;
+
+	char *pin_name;
+
+	struct bpf_insn *insns;
+
+	size_t insns_cnt;
+
+	struct reloc_desc *reloc_desc;
+	int nr_reloc;
+	int log_level;
+
+	struct {
+		int nr;
+		int *fds;
+	} instances;
+	int (*bpf_program_prep_t)(void *, int, void *, int, void *);
+
+	struct bpf_object *obj;
+	void *priv;
+	void (*bpf_program_clear_priv_t)(void *, void *);
+
+	bool load;
+	bool mark_btf_static;
+	enum bpf_prog_type type;
+	enum bpf_attach_type expected_attach_type;
+	int prog_ifindex;
+	__u32 attach_btf_obj_fd;
+	__u32 attach_btf_id;
+	__u32 attach_prog_fd;
+	void *func_info;
+	__u32 func_info_rec_size;
+	__u32 func_info_cnt;
+
+	void *line_info;
+	__u32 line_info_rec_size;
+	__u32 line_info_cnt;
+	__u32 prog_flags;
+};
+
+#define BPF_INSN_SZ (sizeof(struct bpf_insn))
+
+/* relo_core.h */
+
+enum bpf_core_relo_kind {
+	BPF_FIELD_BYTE_OFFSET = 0,	/* field byte offset */
+	BPF_FIELD_BYTE_SIZE = 1,	/* field size in bytes */
+	BPF_FIELD_EXISTS = 2,		/* field existence in target kernel */
+	BPF_FIELD_SIGNED = 3,		/* field signedness (0 - unsigned, 1 - signed) */
+	BPF_FIELD_LSHIFT_U64 = 4,	/* bitfield-specific left bitshift */
+	BPF_FIELD_RSHIFT_U64 = 5,	/* bitfield-specific right bitshift */
+	BPF_TYPE_ID_LOCAL = 6,		/* type ID in local BPF object */
+	BPF_TYPE_ID_TARGET = 7,		/* type ID in target kernel */
+	BPF_TYPE_EXISTS = 8,		/* type existence in target kernel */
+	BPF_TYPE_SIZE = 9,		/* type size in bytes */
+	BPF_ENUMVAL_EXISTS = 10,	/* enum value existence in target kernel */
+	BPF_ENUMVAL_VALUE = 11,		/* enum value integer value */
+};
+
+struct bpf_core_relo {
+	__u32   insn_off;
+	__u32   type_id;
+	__u32   access_str_off;
+	enum bpf_core_relo_kind kind;
+};
 
 #endif
