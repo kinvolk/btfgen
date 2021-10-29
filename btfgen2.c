@@ -77,6 +77,10 @@ static int verbose_print(enum libbpf_print_level level, const char *format, va_l
 
 struct btf;
 
+static void *uint_as_hash_key(int x) {
+	return (void *)(uintptr_t)x;
+}
+
 /* generate bigger final BTF with all eBPF object used types (complete complex types) */
 int generate_btf_01(const char *src_btf, const char *dst_btf, const char *objspaths[]) {
 
@@ -116,18 +120,103 @@ int generate_btf_01(const char *src_btf, const char *dst_btf, const char *objspa
 	return 0;
 }
 
-/* bpf_object__relocate_core logic: we need the bpf_core_relos */
-int bpf_object_relocate_core(struct bpf_object *obj) {
+int add_btf_type_recursive(struct btf *dest, struct btf *src, int id, struct hashmap *ids_map) {
+	uintptr_t new = 0;
 
+	int new_id;
+
+	if (hashmap__find(ids_map, uint_as_hash_key(id), (void **)&new)) {
+		return 0;
+	}
+
+	struct btf_type *t = btf__type_by_id(src, id);
+	struct btf_member *btf_member;
+	struct btf_array *array;
+
+	new_id = btf__add_type(dest, src, btf__type_by_id(src, id));
+	hashmap__add(ids_map, uint_as_hash_key(id), uint_as_hash_key(new_id));
+
+	/* add all types that dependend on it */
+	switch (btf_kind(t)) {
+	case BTF_KIND_STRUCT:
+	case BTF_KIND_UNION:
+		for (int i = 0; i < btf_vlen(t); i++) {
+			btf_member = btf_members(t) + i;
+			add_btf_type_recursive(dest, src, btf_member->type, ids_map);
+		}
+		break;
+	case BTF_KIND_CONST:
+	case BTF_KIND_VOLATILE:
+	case BTF_KIND_TYPEDEF:
+		add_btf_type_recursive(dest, src, t->type, ids_map);
+		break;
+	case BTF_KIND_ARRAY:
+		array = btf_array(t);
+		add_btf_type_recursive(dest, src, array->type, ids_map);
+		add_btf_type_recursive(dest, src, array->index_type, ids_map);
+	}
+
+	return 0;
+}
+
+static size_t bpf_reloc_info_hash_fn(const void *key, void *ctx)
+{
+	return (size_t)key;
+}
+
+static bool bpf_reloc_info_equal_fn(const void *k1, const void *k2, void *ctx)
+{
+	return k1 == k2;
+}
+
+int find_type_id(struct btf *target_btf, const char *name) {
+	int n, i;
+	struct btf_type *t;
+
+	n = btf__get_nr_types(target_btf);
+	for (i = 0; i <= n; i++) {
+		t = btf__type_by_id(target_btf, i);
+
+		if (strcmp(btf__str_by_offset(target_btf, t->name_off), name) == 0) {
+			return i;
+		}
+	}
+
+	return 0;
+}
+
+int id_get(struct hashmap *ids_map, int old) {
+	uintptr_t new = 0;
+
+	if (old == 0)
+		return 0;
+
+	if (!hashmap__find(ids_map, uint_as_hash_key(old), (void **)&new)) {
+		/* return id for void as it's possible that the ID we're looking for is
+		 * the type of a pointer that we're not adding.
+		 */
+		return 0;
+	}
+
+	return (unsigned int)(uintptr_t)new;
+}
+
+/* bpf_object__relocate_core logic: we need the bpf_core_relos */
+int bpf_object_relocate_core(struct bpf_object *obj, struct btf *kernel_btf, const char *target_path) {
 	int i = 0;
 
 	const struct btf_ext_info_sec *sec;
 	const struct bpf_core_relo *rec;
 	const struct btf_ext_info *seg;
 
-	struct bpf_program *prog;
-
 	const char *sec_name;
+
+	struct btf *local_btf = obj->btf;
+
+	struct hashmap *ids_map = hashmap__new(bpf_reloc_info_hash_fn, bpf_reloc_info_equal_fn, NULL);
+	struct btf *created_btf = btf__new_empty();
+
+	int id;
 
 	seg = &obj->btf_ext->core_relo_info;
 	for_each_btf_ext_sec(seg, sec)
@@ -139,28 +228,68 @@ int bpf_object_relocate_core(struct bpf_object *obj) {
 		}
 		printf("sec_name = %s\n", sec_name);
 
-		prog = NULL;
-		for (i = 0; i < obj->nr_programs; i++) {
-			prog = &obj->programs[i];
-			if (strcmp(prog->sec_name, sec_name) == 0)
-				break;
-		}
-		if (!prog) {
-			printf("sec '%s': failed to find a BPF program\n", sec_name);
-			return -ENOENT;
-		}
-
-		int sec_idx = prog->sec_idx;
-
 		printf("sec '%s': found %d CO-RE relocations\n", sec_name, sec->num_info);
 
 		for_each_btf_ext_rec(seg, sec, i, rec)
 		{
-			int insn_idx = rec->insn_off / BPF_INSN_SZ;
 			// each rec, here, is a bpf_core_relo for us to discover types in target BTF
 			// we can do something like bpf_core_find_cands
+			printf("relocation of type %u. acc str %s\n",
+				rec->type_id, btf__str_by_offset(local_btf, rec->access_str_off));
+
+			struct btf_type *t = btf__type_by_id(local_btf, rec->type_id);
+			const char *name = btf__str_by_offset(local_btf, t->name_off);
+			printf("type name is: %s\n", name);
+
+			id = find_type_id(kernel_btf, name);
+			printf("matching type in targ btf is %d\n", id);
+
+			add_btf_type_recursive(created_btf, kernel_btf, id, ids_map);
 		}
 	}
+
+	/* fix up ids */
+	for (int i = 0; i <= btf__get_nr_types(created_btf); i++) {
+		struct btf_member *btf_member;
+		struct btf_type *btf_type;
+		struct btf_param *params;
+		struct btf_array *array;
+
+		btf_type = (struct btf_type *) btf__type_by_id(created_btf, i);
+
+		switch (btf_kind(btf_type)) {
+		case BTF_KIND_STRUCT:
+		case BTF_KIND_UNION:
+			for (int i = 0; i < btf_vlen(btf_type); i++) {
+				btf_member = btf_members(btf_type) + i;
+				btf_member->type = id_get(ids_map, btf_member->type);
+			}
+			break;
+		case BTF_KIND_PTR:
+		case BTF_KIND_TYPEDEF:
+		case BTF_KIND_VOLATILE:
+		case BTF_KIND_CONST:
+		case BTF_KIND_RESTRICT:
+		case BTF_KIND_FUNC:
+		case BTF_KIND_VAR:
+			btf_type->type = id_get(ids_map, btf_type->type);
+			break;
+		case BTF_KIND_ARRAY:
+			array = btf_array(btf_type);
+			array->index_type = id_get(ids_map, array->index_type);
+			array->type = id_get(ids_map, array->type);
+			break;
+		case BTF_KIND_FUNC_PROTO:
+			btf_type->type = id_get(ids_map, btf_type->type);
+			params = btf_params(btf_type);
+			for (int i = 0; i < btf_vlen(btf_type); i++) {
+				params[i].type = id_get(ids_map, params[i].type);
+			}
+			break;
+		}
+	}
+
+	btf__save_to_file(created_btf, target_path);
 
 	return 0;
 }
@@ -195,7 +324,7 @@ int generate_btf_02(const char *src_btf, const char *dst_btf, const char *objspa
 		}
 
 		// here we would need to call a function to each bpf_core_relo inside .BTF.ext of obj
-		bpf_object_relocate_core(obj);
+		bpf_object_relocate_core(obj, targ_btf, dst_btf);
 
 		bpf_object__close(obj);
 	}
