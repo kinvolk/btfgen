@@ -73,55 +73,103 @@ static int verbose_print(enum libbpf_print_level level, const char *format, va_l
 }
 
 int generate_btf(const char *src_btf, const char *dst_btf, const char *objspaths[]) {
-	struct btf_reloc_info *reloc_info;
-	struct btf *btf_new;
 	int err;
 
-	reloc_info = bpf_reloc_info__new(src_btf);
-	err = libbpf_get_error(reloc_info);
+	struct bpf_object_open_opts ops = {
+		.sz = sizeof(ops),
+		.btf_custom_path = src_btf,
+	};
+
+	struct bpf_object *obj = bpf_object__open_file(objspaths[0], &ops);
+	err = libbpf_get_error(obj);
 	if (err) {
-		printf("failed to allocate info structure\n");
+		printf("error opening object\n");
 		goto out;
 	}
 
-	for (int i = 0; objspaths[i] != NULL; i++) {
-		printf("processing %s object\n", objspaths[i]);
+	struct bpf_object_load_attr attr = {
+		.obj = obj,
+		//.target_btf_path = src_btf,
+	};
 
-		struct bpf_object *obj = bpf_object__open(objspaths[i]);
-		err = libbpf_get_error(obj);
-		if (err) {
-			printf("error opening object\n");
-			goto out;
+	err = bpf_object__load_xattr(&attr);
+	if (err) {
+		goto out;
+	}
+
+	struct bpf_progam *prog;
+	struct bpf_core_relo_pub *relos;
+
+	bpf_object__for_each_program(prog, obj) {
+		printf("relos for: %s\n", bpf_program__name(prog));
+
+		relos = bpf_program__core_relos(prog);
+		int n = bpf_program__n_core_relos(prog);
+		for (int i = 0; i < n; i++) {
+			//printf("program: %s\n", relos[i].prog_name);
+			printf("insn_idx: %d\n", relos[i].insn_idx);
+			printf("poison: %d\n", relos[i].poison);
+
+			printf("root type %d\n", relos[i].targ_spec.root_type_id);
 		}
-
-		err = bpf_object__reloc_info_gen(reloc_info, obj);
-		if (err) {
-			bpf_object__close(obj);
-			printf("failed to generate btf info for object\n");
-			goto out;
-		}
-
-		bpf_object__close(obj);
 	}
 
-	btf_new = bpf_reloc_info__get_btf(reloc_info);
-	err = libbpf_get_error(btf_new);
-	if (err) {
-		printf("error generating btf\n");
-		goto out;
-	}
-
-	err = btf__save_to_file(btf_new, dst_btf);
-	if (err) {
-		printf("error saving btf file\n");
-		goto out;
-	}
-
+	return 0;
 out:
-	if (!libbpf_get_error(btf_new))
-		btf__free(btf_new);
-	bpf_reloc_info__free(reloc_info);
+	//if (!libbpf_get_error(btf_new))
+	//	btf__free(btf_new);
+	//bpf_reloc_info__free(reloc_info);
 	return err;
+
+//	struct btf_reloc_info *reloc_info;
+//	struct btf *btf_new;
+//	int err;
+//
+//	reloc_info = bpf_reloc_info__new(src_btf);
+//	err = libbpf_get_error(reloc_info);
+//	if (err) {
+//		printf("failed to allocate info structure\n");
+//		goto out;
+//	}
+//
+//	for (int i = 0; objspaths[i] != NULL; i++) {
+//		printf("processing %s object\n", objspaths[i]);
+//
+//		struct bpf_object *obj = bpf_object__open(objspaths[i]);
+//		err = libbpf_get_error(obj);
+//		if (err) {
+//			printf("error opening object\n");
+//			goto out;
+//		}
+//
+//		err = bpf_object__reloc_info_gen(reloc_info, obj);
+//		if (err) {
+//			bpf_object__close(obj);
+//			printf("failed to generate btf info for object\n");
+//			goto out;
+//		}
+//
+//		bpf_object__close(obj);
+//	}
+//
+//	btf_new = bpf_reloc_info__get_btf(reloc_info);
+//	err = libbpf_get_error(btf_new);
+//	if (err) {
+//		printf("error generating btf\n");
+//		goto out;
+//	}
+//
+//	err = btf__save_to_file(btf_new, dst_btf);
+//	if (err) {
+//		printf("error saving btf file\n");
+//		goto out;
+//	}
+//
+//out:
+//	if (!libbpf_get_error(btf_new))
+//		btf__free(btf_new);
+//	bpf_reloc_info__free(reloc_info);
+//	return err;
 }
 
 int main(int argc, char **argv)
