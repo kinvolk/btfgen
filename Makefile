@@ -1,6 +1,6 @@
 CC = gcc
 BASEDIR := $(shell pwd)
-INCLUDES := -I libbpf_out/usr/include/
+INCLUDES := -I libbpf_out/usr/include/ -I /usr/include/ -I.
 
 all: btfgen
 

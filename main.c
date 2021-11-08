@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <linux/limits.h>
 #include <argp.h>
 #include <dirent.h>
 
@@ -122,7 +123,7 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 		goto out;
 	}
 
-	err = btf__save_to_file(btf_new, dst_btf);
+	err = btf__save_raw(btf_new, dst_btf);
 	if (err) {
 		printf("error saving btf file\n");
 		goto out;
