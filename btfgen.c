@@ -330,7 +330,7 @@ static int bpf_reloc_type_add_member(struct btf_reloc_info *info,
 	return 0;
 }
 
-static int btf_reloc_info_gen_field(struct btf_reloc_info *info, struct bpf_core_spec_pub *targ_spec) {
+static int btf_reloc_info_gen_field(struct btf_reloc_info *info, struct bpf_core_relo_spec *targ_spec) {
 	struct btf *btf = (struct btf *) info->src_btf;
 	struct btf_reloc_type *reloc_type;
 	struct btf_member *btf_member;
@@ -347,9 +347,9 @@ static int btf_reloc_info_gen_field(struct btf_reloc_info *info, struct bpf_core
 		return PTR_ERR(reloc_type);
 
 	/* add types for complex types (arrays, unions, structures) */
-	for (int i = 1; i < targ_spec->raw_len; i++) {
+	for (int i = 1; i < targ_spec->spec_len; i++) {
 
-		/* skip typedefs and mods. */
+		/* skip typedefs and mods */
 		while (btf_is_mod(btf_type) || btf_is_typedef(btf_type)) {
 			id = btf_type->type;
 			reloc_type = btf_reloc_get_type(info, id);
@@ -361,7 +361,7 @@ static int btf_reloc_info_gen_field(struct btf_reloc_info *info, struct bpf_core
 		switch (btf_kind(btf_type)) {
 		case BTF_KIND_STRUCT:
 		case BTF_KIND_UNION:
-			idx = targ_spec->raw_spec[i];
+			idx = targ_spec->spec[i];
 			btf_member = btf_members(btf_type) + idx;
 			btf_type =  (struct btf_type *) btf__type_by_id(btf, btf_member->type);
 
@@ -391,17 +391,18 @@ static int btf_reloc_info_gen_field(struct btf_reloc_info *info, struct bpf_core
 	return 0;
 }
 
-static int btf_reloc_info_gen_type(struct btf_reloc_info *info, struct bpf_core_spec_pub *targ_spec) {
+static int btf_reloc_info_gen_type(struct btf_reloc_info *info, struct bpf_core_relo_spec *targ_spec) {
 	printf("untreated type based relocation\n");
 	return -EOPNOTSUPP;
 }
 
-static int btf_reloc_info_gen_enumval(struct btf_reloc_info *info, struct bpf_core_spec_pub *targ_spec) {
+static int btf_reloc_info_gen_enumval(struct btf_reloc_info *info, struct bpf_core_relo_spec *targ_spec) {
 	printf("untreated enumval based relocation\n");
 	return -EOPNOTSUPP;
 }
 
-static int btf_reloc_info_gen(struct btf_reloc_info *info, struct bpf_core_relo_pub *res) {
+static int btf_reloc_info_gen(struct btf_reloc_info *info, struct bpf_core_relo_result *res) {
+
 	if (core_relo_is_type_based(res->relo_kind))
 		return btf_reloc_info_gen_type(info, &res->targ_spec);
 
@@ -415,13 +416,14 @@ static int btf_reloc_info_gen(struct btf_reloc_info *info, struct bpf_core_relo_
 }
 
 int bpf_object__reloc_info_gen(struct btf_reloc_info *reloc_info, struct bpf_object *obj) {
-	struct bpf_core_relo_pub *relos;
+	struct bpf_core_relo_result *relos;
 	struct bpf_program *prog;
 	int err;
 
 	bpf_object__for_each_program(prog, obj) {
-		relos = (struct bpf_core_relo_pub *) bpf_program__core_relos(prog);
+		relos = (struct bpf_core_relo_result *) bpf_program__core_relos(prog);
 		int n = bpf_program__core_relos_cnt(prog);
+
 		for (int i = 0; i < n; i++) {
 			if (relos[i].poison) {
 				printf("core reloc poisoned...\n");

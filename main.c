@@ -15,6 +15,7 @@
 #include <linux/limits.h>
 #include <argp.h>
 #include <dirent.h>
+#include <stdbool.h>
 
 #include <bpf/libbpf.h>
 #include <bpf/btf.h>
@@ -80,6 +81,7 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 	struct bpf_object_open_opts ops = {
 		.sz = sizeof(ops),
 		.btf_custom_path = src_btf,
+		.record_core_relos = true,
 	};
 
 	reloc_info = bpf_reloc_info__new(src_btf);
@@ -98,15 +100,10 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 			goto out;
 		}
 
-        struct bpf_object_prepare_attr attr = {
-            .obj = obj,
-            .record_core_relos = true,
-        };
-
-        err = bpf_object__prepare_xattr(&attr);
-        if (err) {
-            goto out;
-        }
+		err = bpf_object__prepare(obj);
+		if (err) {
+			goto out;
+		}
 
 		err = bpf_object__reloc_info_gen(reloc_info, obj);
 		if (err) {
