@@ -419,6 +419,7 @@ int btfgen_obj_reloc_info_gen(struct btf_reloc_info *reloc_info, struct bpf_obje
 	struct bpf_core_relo_result *relos;
 	struct bpf_program *prog;
 	int err;
+	bool poisoned = false;
 
 	bpf_object__for_each_program(prog, obj) {
 		relos = (struct bpf_core_relo_result *) bpf_program__core_relos(prog);
@@ -426,7 +427,7 @@ int btfgen_obj_reloc_info_gen(struct btf_reloc_info *reloc_info, struct bpf_obje
 
 		for (int i = 0; i < n; i++) {
 			if (relos[i].poison) {
-				printf("core reloc poisoned...\n");
+				poisoned = true;
 				continue;
 			}
 
@@ -437,6 +438,9 @@ int btfgen_obj_reloc_info_gen(struct btf_reloc_info *reloc_info, struct bpf_obje
 	}
 
 out:
+	if (poisoned)
+		printf("warning: poisoned btf for this target\n");
+
 	return err;
 }
 
