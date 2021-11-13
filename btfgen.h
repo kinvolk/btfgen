@@ -16,7 +16,7 @@
 
 struct bpf_reloc_info;
 
-struct btf_reloc_info *bpf_reloc_info__new(const char *targ_btf_path);
-void bpf_reloc_info__free(struct btf_reloc_info *info);
-int bpf_object__reloc_info_gen(struct btf_reloc_info *reloc_info, struct bpf_object *obj);
-struct btf *bpf_reloc_info__get_btf(struct btf_reloc_info *info);
+struct btf_reloc_info *btfgen_reloc_info_new(const char *targ_btf_path);
+void btfgen_reloc_info_free(struct btf_reloc_info *info);
+int btfgen_obj_reloc_info_gen(struct btf_reloc_info *reloc_info, struct bpf_object *obj);
+struct btf *btfgen_reloc_info_get_btf(struct btf_reloc_info *info);
