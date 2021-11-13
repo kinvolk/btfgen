@@ -16,6 +16,8 @@
 #include <argp.h>
 #include <dirent.h>
 #include <stdbool.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include <bpf/libbpf.h>
 #include <bpf/btf.h>
@@ -31,6 +33,7 @@ struct env {
 	const char *obj[MAX_OBJECTS];
 	int obj_index;
 	bool verbose;
+	bool nopoison;
 };
 
 static const struct argp_option opts[] = {
@@ -38,6 +41,7 @@ static const struct argp_option opts[] = {
 	{ "outputdir", 'o', "outputdir", 0, "dir to output the result BTF files" },
 	{ "inputdir", 'i', "inputdir", 0, "dir with source BTF files to use" },
 	{ "object", OBJ_KEY,  "object", 0, "path of object file to generate BTFs for" },
+	{ "nopoison", 'p', NULL, 0, "do not save poisoned BTF files" },
 	{},
 };
 
@@ -47,6 +51,9 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	switch (key) {
 	case 'v':
 		env->verbose = true;
+		break;
+	case 'p':
+		env->nopoison = true;
 		break;
 	case 'o':
 		env->outputdir = arg;
@@ -192,6 +199,8 @@ int main(int argc, char **argv)
 		err = generate_btf(src_btf_path, dst_btf_path, env.obj);
 		if (err && err == -ENOEXEC) {
 			printf("WARN: btf for %s is poisoned\n", dst_btf_path);
+			if (env.nopoison)
+				unlink(dst_btf_path);
 		} else if (err) {
 			printf("ERR : failed to generate btf for %s\n", src_btf_path);
 			closedir(d);
