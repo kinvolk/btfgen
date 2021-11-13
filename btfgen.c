@@ -439,7 +439,7 @@ int btfgen_obj_reloc_info_gen(struct btf_reloc_info *reloc_info, struct bpf_obje
 
 out:
 	if (poisoned)
-		printf("warning: poisoned btf for this target\n");
+		return -ENOEXEC;
 
 	return err;
 }

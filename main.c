@@ -77,6 +77,7 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 	struct bpf_object *obj;
 	struct btf *btf_new;
 	int err;
+	bool poisoned = false;
 
 	struct bpf_object_open_opts ops = {
 		.sz = sizeof(ops),
@@ -87,16 +88,16 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 	reloc_info = btfgen_reloc_info_new(src_btf);
 	err = libbpf_get_error(reloc_info);
 	if (err) {
-		printf("failed to allocate info structure\n");
+		printf("ERR : failed to allocate info structure\n");
 		goto out;
 	}
 
 	for (int i = 0; objspaths[i] != NULL; i++) {
-		printf("processing %s object\n", objspaths[i]);
+		printf("OBJ : %s\n", objspaths[i]);
 		obj = bpf_object__open_file(objspaths[i], &ops);
 		err = libbpf_get_error(obj);
 		if (err) {
-			printf("error opening object\n");
+			printf("ERR : error opening object\n");
 			goto out;
 		}
 
@@ -107,7 +108,9 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 
 		err = btfgen_obj_reloc_info_gen(reloc_info, obj);
 		if (err) {
-			goto out;
+			if (err != -ENOEXEC)
+				goto out;
+			poisoned = true;
 		}
 
 		bpf_object__close(obj);
@@ -116,13 +119,15 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 	btf_new = btfgen_reloc_info_get_btf(reloc_info);
 	err = libbpf_get_error(btf_new);
 	if (err) {
-		printf("error generating btf\n");
+		printf("ERR : error generating btf\n");
 		goto out;
 	}
 
+	// destination BTF
+	printf("DBTF: %s\n", dst_btf);
 	err = btf__save_raw(btf_new, dst_btf);
 	if (err) {
-		printf("error saving btf file\n");
+		printf("ERR : error saving btf file\n");
 		goto out;
 	}
 
@@ -130,6 +135,10 @@ out:
 	if (!libbpf_get_error(btf_new))
 		btf__free(btf_new);
 	btfgen_reloc_info_free(reloc_info);
+
+	if (!err && poisoned)
+		return -ENOEXEC;
+
 	return err;
 }
 
@@ -159,7 +168,7 @@ int main(int argc, char **argv)
 
 	d = opendir(env.inputdir);
 	if (!d) {
-		printf("error opening input dir\n");
+		printf("ERR : error opening input dir\n");
 		return -1;
 	}
 
@@ -177,11 +186,14 @@ int main(int argc, char **argv)
 		snprintf(src_btf_path, sizeof(src_btf_path), "%s/%s", env.inputdir, dir->d_name);
 		snprintf(dst_btf_path, sizeof(dst_btf_path), "%s/%s", env.outputdir, dir->d_name);
 
-		printf("generating btf from %s\n", src_btf_path);
+		// source BTF
+		printf("SBTF: %s\n", src_btf_path);
 
 		err = generate_btf(src_btf_path, dst_btf_path, env.obj);
-		if (err) {
-			printf("failed to generate btf for %s\n", src_btf_path);
+		if (err && err == -ENOEXEC) {
+			printf("WARN: btf for %s is poisoned\n", dst_btf_path);
+		} else if (err) {
+			printf("ERR : failed to generate btf for %s\n", src_btf_path);
 			closedir(d);
 			return 1;
 		}
@@ -189,6 +201,6 @@ int main(int argc, char **argv)
 
 	closedir(d);
 
-	printf("done!\n");
+	printf("STAT: done!\n");
 	return 0;
 }
