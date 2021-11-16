@@ -118,7 +118,7 @@ static int verbose_print(enum libbpf_print_level level, const char *format, va_l
 static int generate_btf(const char *src_btf, const char *dst_btf, const char *objspaths[]) {
 	struct btf_reloc_info *reloc_info;
 	struct bpf_object *obj;
-	struct btf *btf_new;
+	struct btf *btf_new = NULL;
 	int err;
 	bool poisoned = false;
 
