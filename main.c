@@ -99,6 +99,10 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	case ARGP_KEY_END:
 		if (env->output == NULL || env->input == NULL || env->obj_index == 0)
 			argp_usage(state);
+		if (env->outfile < 0 || env->infile < 0) {
+			printf("ERR : could not stat given argument\n");
+			argp_usage(state);
+		}
 		break;
 	default:
 		return ARGP_ERR_UNKNOWN;
@@ -210,7 +214,6 @@ int main(int argc, char **argv)
 		if (env.outfile) {
 			err = generate_btf(env.input, env.output, env.obj);
 			generate_err(env.output);
-
 		} else {
 			snprintf(dst_btf_path, sizeof(dst_btf_path), "%s/%s", env.output, basename(strdup(env.input)));
 			err = generate_btf(env.input, dst_btf_path, env.obj);
