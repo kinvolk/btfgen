@@ -199,11 +199,6 @@ int main(int argc, char **argv)
 	if (err)
 		return err;
 
-	if (getuid() != 0) {
-		printf("ERR : you need root privileges to run this tool\n");
-		return 1;
-	}
-
 	if (env.verbose)
 		libbpf_set_print(verbose_print);
 
