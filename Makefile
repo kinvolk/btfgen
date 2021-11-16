@@ -1,6 +1,6 @@
 CC = gcc
 BASEDIR := $(shell pwd)
-INCLUDES := -I libbpf_out/usr/include/
+INCLUDES := -I libbpf_out/usr/include/ -I /usr/include/ -I.
 
 all: btfgen
 
@@ -13,7 +13,7 @@ libbpf_out/usr/lib64/libbpf.a: $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Mak
 		$(MAKE) DESTDIR=$(BASEDIR)/libbpf_out install_uapi_headers && \
 		cd ../..
 
-btfgen: btfgen.c libbpf_out/usr/lib64/libbpf.a
+btfgen: main.c btfgen.c libbpf_out/usr/lib64/libbpf.a
 	$(CC) -g -static -ggdb -gdwarf -O2 -o btfgen $(INCLUDES) $^ -lelf -lz
 
 clean:
