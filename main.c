@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <linux/limits.h>
 #include <argp.h>
 #include <dirent.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <libgen.h>
+#include <linux/limits.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include <bpf/libbpf.h>
 #include <bpf/btf.h>
@@ -27,23 +30,50 @@
 #define OBJ_KEY 260
 #define MAX_OBJECTS 128
 
+#define generate_err(x) {									\
+	if (err && err == -ENOEXEC) {							\
+		printf("WARN: generated btf (%s) is poisoned%s\n",	\
+			x, env.nopoison ? " (deleting)" : "");			\
+		if (env.nopoison)									\
+			unlink(x);										\
+	} else if (err) {										\
+		printf("ERR : failed to generate btf for %s\n", x);	\
+		return 1;											\
+	}														\
+}
+
 struct env {
-	const char *outputdir;
-	const char *inputdir;
+	const char *output, *input;
 	const char *obj[MAX_OBJECTS];
 	int obj_index;
-	bool verbose;
-	bool nopoison;
+	bool verbose, nopoison;
+	bool infile, outfile;
 };
 
 static const struct argp_option opts[] = {
 	{ "verbose", 'v', NULL, 0, "display libbpf debug messages" },
-	{ "outputdir", 'o', "outputdir", 0, "dir to output the result BTF files" },
-	{ "inputdir", 'i', "inputdir", 0, "dir with source BTF files to use" },
+	{ "output", 'o', "output", 0, "dir to output the result BTF files" },
+	{ "input", 'i', "input", 0, "dir with source BTF files to use" },
 	{ "object", OBJ_KEY,  "object", 0, "path of object file to generate BTFs for" },
 	{ "nopoison", 'p', NULL, 0, "do not save poisoned BTF files" },
 	{},
 };
+
+static int is_file(const char *path) {
+	struct stat st = {};
+
+	if (stat(path, &st) < 0)
+		return -1;
+
+	switch (st.st_mode & S_IFMT) {
+	case S_IFDIR:
+		return 0;
+	case S_IFREG:
+		return 1;
+	}
+
+	return -1;
+}
 
 static error_t parse_arg(int key, char *arg, struct argp_state *state)
 {
@@ -56,16 +86,18 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 		env->nopoison = true;
 		break;
 	case 'o':
-		env->outputdir = arg;
+		env->output = arg;
+		env->outfile = is_file(env->output);
 		break;
 	case 'i':
-		env->inputdir = arg;
+		env->input = arg;
+		env->infile = is_file(env->input);
 		break;
 	case OBJ_KEY:
 		env->obj[env->obj_index++] = arg;
 		break;
 	case ARGP_KEY_END:
-		if (env->outputdir == NULL || env->inputdir == NULL || env->obj_index == 0)
+		if (env->output == NULL || env->input == NULL || env->obj_index == 0)
 			argp_usage(state);
 		break;
 	default:
@@ -130,7 +162,6 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 		goto out;
 	}
 
-	// destination BTF
 	printf("DBTF: %s\n", dst_btf);
 	err = btf__save_raw(btf_new, dst_btf);
 	if (err) {
@@ -151,9 +182,9 @@ out:
 
 int main(int argc, char **argv)
 {
-	struct dirent *dir;
 	int err;
-	DIR *d;
+	char src_btf_path[PATH_MAX];
+	char dst_btf_path[PATH_MAX];
 
 	static const struct argp argp = {
 		.options = opts,
@@ -168,44 +199,63 @@ int main(int argc, char **argv)
 	if (err)
 		return err;
 
-	/* Set up libbpf errors and debug info callback */
-	if (env.verbose) {
-		libbpf_set_print(verbose_print);
+	if (getuid() != 0) {
+		printf("ERR : you need root privileges to run this tool\n");
+		return 1;
 	}
 
-	d = opendir(env.inputdir);
+	if (env.verbose)
+		libbpf_set_print(verbose_print);
+
+	// single BTF file
+
+	if (env.infile) {
+		printf("SBTF: %s\n", env.input);
+
+		if (env.outfile) {
+			err = generate_btf(env.input, env.output, env.obj);
+			generate_err(env.output);
+
+		} else {
+			snprintf(dst_btf_path, sizeof(dst_btf_path), "%s/%s", env.output, basename(strdup(env.input)));
+			err = generate_btf(env.input, dst_btf_path, env.obj);
+			generate_err(dst_btf_path);
+		}
+
+		return 0;
+	}
+
+	if (env.outfile) {
+		printf("ERR : can't have just one file as output\n");
+		return 1;
+	}
+
+	// directory w/ BTF files
+
+	DIR *d;
+	struct dirent *dir;
+
+	d = opendir(env.input);
 	if (!d) {
 		printf("ERR : error opening input dir\n");
 		return -1;
 	}
 
 	while ((dir = readdir(d)) != NULL) {
-		char src_btf_path[PATH_MAX];
-		char dst_btf_path[PATH_MAX];
 
 		if (dir->d_type != DT_REG)
 			continue;
 
-		/* ignore non BTF files */
 		if (strncmp(dir->d_name + strlen(dir->d_name) - 4, ".btf", 4))
 			continue;
 
-		snprintf(src_btf_path, sizeof(src_btf_path), "%s/%s", env.inputdir, dir->d_name);
-		snprintf(dst_btf_path, sizeof(dst_btf_path), "%s/%s", env.outputdir, dir->d_name);
+		snprintf(src_btf_path, sizeof(src_btf_path), "%s/%s", env.input, dir->d_name);
+		snprintf(dst_btf_path, sizeof(dst_btf_path), "%s/%s", env.output, dir->d_name);
 
-		// source BTF
 		printf("SBTF: %s\n", src_btf_path);
 
 		err = generate_btf(src_btf_path, dst_btf_path, env.obj);
-		if (err && err == -ENOEXEC) {
-			printf("WARN: btf for %s is poisoned\n", dst_btf_path);
-			if (env.nopoison)
-				unlink(dst_btf_path);
-		} else if (err) {
-			printf("ERR : failed to generate btf for %s\n", src_btf_path);
-			closedir(d);
-			return 1;
-		}
+		generate_err(dst_btf_path);
 	}
 
 	closedir(d);
