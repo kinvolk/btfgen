@@ -30,16 +30,16 @@
 #define OBJ_KEY 260
 #define MAX_OBJECTS 128
 
-#define generate_err(x) {									\
-	if (err && err == -ENOEXEC) {							\
-		printf("WARN: generated btf (%s) is poisoned%s\n",	\
-			x, env.nopoison ? " (deleting)" : "");			\
-		if (env.nopoison)									\
-			unlink(x);										\
-	} else if (err) {										\
-		printf("ERR : failed to generate btf for %s\n", x);	\
-		return 1;											\
-	}														\
+#define generate_err(x) {                                               \
+	if (err && err == -ENOEXEC) {                                   \
+		printf("WARN: generated btf (%s) is poisoned%s\n",      \
+			x, env.nopoison ? " (deleting)" : "");          \
+		if (env.nopoison)                                       \
+			unlink(x);                                      \
+	} else if (err) {                                               \
+		printf("ERR : failed to generate btf for %s\n", x);     \
+		return 1;                                               \
+	}                                                               \
 }
 
 struct env {
@@ -166,7 +166,8 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 		goto out;
 	}
 
-	printf("DBTF: %s\n", dst_btf);
+	// target btf
+	printf("TBTF: %s\n", dst_btf);
 	err = btf__save_raw(btf_new, dst_btf);
 	if (err) {
 		printf("ERR : error saving btf file\n");
@@ -209,7 +210,7 @@ int main(int argc, char **argv)
 	// single BTF file
 
 	if (env.infile) {
-		printf("SBTF: %s\n", env.input);
+		printf("LBTF: %s\n", env.input);
 
 		if (env.outfile) {
 			err = generate_btf(env.input, env.output, env.obj);
@@ -250,7 +251,8 @@ int main(int argc, char **argv)
 		snprintf(src_btf_path, sizeof(src_btf_path), "%s/%s", env.input, dir->d_name);
 		snprintf(dst_btf_path, sizeof(dst_btf_path), "%s/%s", env.output, dir->d_name);
 
-		printf("SBTF: %s\n", src_btf_path);
+		// local BTF
+		printf("LBTF: %s\n", src_btf_path);
 
 		err = generate_btf(src_btf_path, dst_btf_path, env.obj);
 		generate_err(dst_btf_path);
