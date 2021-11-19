@@ -31,12 +31,7 @@
 #define MAX_OBJECTS 128
 
 #define generate_err(x) {                                               \
-	if (err && err == -ENOEXEC) {                                   \
-		printf("WARN: generated btf (%s) is poisoned%s\n",      \
-			x, env.nopoison ? " (deleting)" : "");          \
-		if (env.nopoison)                                       \
-			unlink(x);                                      \
-	} else if (err) {                                               \
+	if (err) {                                                      \
 		printf("ERR : failed to generate btf for %s\n", x);     \
 		return 1;                                               \
 	}                                                               \
@@ -46,8 +41,8 @@ struct env {
 	const char *output, *input;
 	const char *obj[MAX_OBJECTS];
 	int obj_index;
-	bool verbose, nopoison;
-	bool infile, outfile;
+	bool verbose;
+	int infile, outfile;
 };
 
 static const struct argp_option opts[] = {
@@ -55,7 +50,6 @@ static const struct argp_option opts[] = {
 	{ "output", 'o', "output", 0, "dir to output the result BTF files" },
 	{ "input", 'i', "input", 0, "dir with source BTF files to use" },
 	{ "object", OBJ_KEY,  "object", 0, "path of object file to generate BTFs for" },
-	{ "nopoison", 'p', NULL, 0, "do not save poisoned BTF files" },
 	{},
 };
 
@@ -81,9 +75,6 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	switch (key) {
 	case 'v':
 		env->verbose = true;
-		break;
-	case 'p':
-		env->nopoison = true;
 		break;
 	case 'o':
 		env->output = arg;
@@ -120,7 +111,6 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 	struct bpf_object *obj;
 	struct btf *btf_new = NULL;
 	int err;
-	bool poisoned = false;
 
 	reloc_info = btfgen_reloc_info_new(src_btf);
 	err = libbpf_get_error(reloc_info);
@@ -150,11 +140,8 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 		}
 
 		err = btfgen_obj_reloc_info_gen(reloc_info, obj);
-		if (err) {
-			if (err != -ENOEXEC)
-				goto out;
-			poisoned = true;
-		}
+		if (err)
+			goto out;
 
 		bpf_object__close(obj);
 	}
@@ -178,9 +165,6 @@ out:
 	if (!libbpf_get_error(btf_new))
 		btf__free(btf_new);
 	btfgen_reloc_info_free(reloc_info);
-
-	if (!err && poisoned)
-		return -ENOEXEC;
 
 	return err;
 }
