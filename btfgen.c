@@ -82,13 +82,6 @@ struct btf_reloc_type {
 	struct hashmap *members;
 };
 
-struct btf_reloc_info {
-	struct hashmap *types;
-	struct hashmap *ids_map;
-
-	struct btf *src_btf;
-};
-
 static size_t bpf_reloc_info_hash_fn(const void *key, void *ctx)
 {
 	return (size_t)key;
