@@ -122,18 +122,18 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 	int err;
 	bool poisoned = false;
 
-	struct bpf_object_open_opts ops = {
-		.sz = sizeof(ops),
-		.btf_custom_path = src_btf,
-		.record_core_relos = true,
-	};
-
 	reloc_info = btfgen_reloc_info_new(src_btf);
 	err = libbpf_get_error(reloc_info);
 	if (err) {
 		printf("ERR : failed to allocate info structure\n");
 		goto out;
 	}
+
+	struct bpf_object_open_opts ops = {
+		.sz = sizeof(ops),
+		.btf_custom = reloc_info->src_btf,
+		.record_core_relos = true,
+	};
 
 	for (int i = 0; objspaths[i] != NULL; i++) {
 		printf("OBJ : %s\n", objspaths[i]);

@@ -14,7 +14,14 @@
 
 #include <bpf/libbpf.h>
 
-struct bpf_reloc_info;
+struct hashmap;
+
+struct btf_reloc_info {
+	struct hashmap *types;
+	struct hashmap *ids_map;
+
+	struct btf *src_btf;
+};
 
 struct btf_reloc_info *btfgen_reloc_info_new(const char *targ_btf_path);
 void btfgen_reloc_info_free(struct btf_reloc_info *info);
