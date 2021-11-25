@@ -173,6 +173,7 @@ void btfgen_reloc_info_free(struct btf_reloc_info *info) {
 		hashmap__free(info->types);
 	}
 
+	btf__free(info->src_btf);
 	free(info);
 }
 
