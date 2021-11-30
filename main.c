@@ -30,11 +30,10 @@
 #define OBJ_KEY 260
 #define MAX_OBJECTS 128
 
-#define generate_err(x) {                                               \
-	if (err) {                                                      \
-		printf("ERR : failed to generate btf for %s\n", x);     \
-		return 1;                                               \
-	}                                                               \
+#define print_err(x) {                                               \
+	if (err) {                                                   \
+		printf("ERR: failed to generate btf for %s\n", x);   \
+	}                                                            \
 }
 
 struct env {
@@ -198,11 +197,13 @@ int main(int argc, char **argv)
 
 		if (env.outfile) {
 			err = generate_btf(env.input, env.output, env.obj);
-			generate_err(env.output);
+			print_err(env.output);
+			return err;
 		} else {
 			snprintf(dst_btf_path, sizeof(dst_btf_path), "%s/%s", env.output, basename(strdup(env.input)));
 			err = generate_btf(env.input, dst_btf_path, env.obj);
-			generate_err(dst_btf_path);
+			print_err(dst_btf_path);
+			return err;
 		}
 
 		return 0;
@@ -239,11 +240,13 @@ int main(int argc, char **argv)
 		printf("LBTF: %s\n", src_btf_path);
 
 		err = generate_btf(src_btf_path, dst_btf_path, env.obj);
-		generate_err(dst_btf_path);
+		print_err(dst_btf_path);
+		goto out;
 	}
 
+out:
 	closedir(d);
 
 	printf("STAT: done!\n");
-	return 0;
+	return err;
 }
