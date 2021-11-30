@@ -30,24 +30,19 @@
 #define OBJ_KEY 260
 #define MAX_OBJECTS 128
 
-#define generate_err(x) {									\
-	if (err && err == -ENOEXEC) {							\
-		printf("WARN: generated btf (%s) is poisoned%s\n",	\
-			x, env.nopoison ? " (deleting)" : "");			\
-		if (env.nopoison)									\
-			unlink(x);										\
-	} else if (err) {										\
-		printf("ERR : failed to generate btf for %s\n", x);	\
-		return 1;											\
-	}														\
+#define generate_err(x) {                                               \
+	if (err) {                                                      \
+		printf("ERR : failed to generate btf for %s\n", x);     \
+		return 1;                                               \
+	}                                                               \
 }
 
 struct env {
 	const char *output, *input;
 	const char *obj[MAX_OBJECTS];
 	int obj_index;
-	bool verbose, nopoison;
-	bool infile, outfile;
+	bool verbose;
+	int infile, outfile;
 };
 
 static const struct argp_option opts[] = {
@@ -55,7 +50,6 @@ static const struct argp_option opts[] = {
 	{ "output", 'o', "output", 0, "dir to output the result BTF files" },
 	{ "input", 'i', "input", 0, "dir with source BTF files to use" },
 	{ "object", OBJ_KEY,  "object", 0, "path of object file to generate BTFs for" },
-	{ "nopoison", 'p', NULL, 0, "do not save poisoned BTF files" },
 	{},
 };
 
@@ -81,9 +75,6 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	switch (key) {
 	case 'v':
 		env->verbose = true;
-		break;
-	case 'p':
-		env->nopoison = true;
 		break;
 	case 'o':
 		env->output = arg;
@@ -118,9 +109,8 @@ static int verbose_print(enum libbpf_print_level level, const char *format, va_l
 static int generate_btf(const char *src_btf, const char *dst_btf, const char *objspaths[]) {
 	struct btf_reloc_info *reloc_info;
 	struct bpf_object *obj;
-	struct btf *btf_new;
+	struct btf *btf_new = NULL;
 	int err;
-	bool poisoned = false;
 
 	reloc_info = btfgen_reloc_info_new(src_btf);
 	err = libbpf_get_error(reloc_info);
@@ -150,11 +140,8 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 		}
 
 		err = btfgen_obj_reloc_info_gen(reloc_info, obj);
-		if (err) {
-			if (err != -ENOEXEC)
-				goto out;
-			poisoned = true;
-		}
+		if (err)
+			goto out;
 
 		bpf_object__close(obj);
 	}
@@ -166,7 +153,8 @@ static int generate_btf(const char *src_btf, const char *dst_btf, const char *ob
 		goto out;
 	}
 
-	printf("DBTF: %s\n", dst_btf);
+	// target btf
+	printf("TBTF: %s\n", dst_btf);
 	err = btf__save_raw(btf_new, dst_btf);
 	if (err) {
 		printf("ERR : error saving btf file\n");
@@ -177,9 +165,6 @@ out:
 	if (!libbpf_get_error(btf_new))
 		btf__free(btf_new);
 	btfgen_reloc_info_free(reloc_info);
-
-	if (!err && poisoned)
-		return -ENOEXEC;
 
 	return err;
 }
@@ -209,7 +194,7 @@ int main(int argc, char **argv)
 	// single BTF file
 
 	if (env.infile) {
-		printf("SBTF: %s\n", env.input);
+		printf("LBTF: %s\n", env.input);
 
 		if (env.outfile) {
 			err = generate_btf(env.input, env.output, env.obj);
@@ -250,7 +235,8 @@ int main(int argc, char **argv)
 		snprintf(src_btf_path, sizeof(src_btf_path), "%s/%s", env.input, dir->d_name);
 		snprintf(dst_btf_path, sizeof(dst_btf_path), "%s/%s", env.output, dir->d_name);
 
-		printf("SBTF: %s\n", src_btf_path);
+		// local BTF
+		printf("LBTF: %s\n", src_btf_path);
 
 		err = generate_btf(src_btf_path, dst_btf_path, env.obj);
 		generate_err(dst_btf_path);

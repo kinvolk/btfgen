@@ -14,8 +14,16 @@ libbpf_out/usr/lib64/libbpf.a: $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Mak
 		cd ../..
 
 btfgen: main.c btfgen.c libbpf_out/usr/lib64/libbpf.a
-	$(CC) -g -static -ggdb -gdwarf -O2 -o btfgen $(INCLUDES) $^ -lelf -lz
+	$(CC) -g -O2 -static -o btfgen $(INCLUDES) $^ -lelf -lz
+
+.PHONY: debug
+debug: main.c btfgen.c libbpf_out/usr/lib64/libbpf.a
+	$(CC) -g -ggdb -gdwarf -fsanitize=address -O0 -fno-omit-frame-pointer -o btfgen $(INCLUDES) $^ -lelf -lz
+
+
+.PHONY: clean-libbpf
+clean-libbpf:
+	$(MAKE) -C libbpf/src clean
 
 clean:
-	$(MAKE) -C libbpf/src clean
 	rm -rf btfgen libbpf_out
