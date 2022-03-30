@@ -1,3 +1,8 @@
+# **NOTE**
+
+**This support has been merged into bpftool, please check https://kinvolk.io/blog/2022/03/btfgen-one-step-closer-to-truly-portable-ebpf-programs/ to learn more.**
+
+
 # BTF GEN
 
 BTF GEN is a utility program that generates the BTF information that is needed
